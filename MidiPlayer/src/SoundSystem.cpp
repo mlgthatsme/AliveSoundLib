@@ -10,7 +10,6 @@
 /////////////////////////////////////////////////////////////////////////////
 
 #include "SoundSystem.hpp"
-#include <algorithm>
 
 std::vector<unsigned char> AliveAudio::m_SoundsDat;
 AliveAudioSoundbank * AliveAudio::m_CurrentSoundbank = nullptr;
@@ -18,6 +17,7 @@ AliveAudioSoundbank * AliveAudio::m_CurrentSoundbank = nullptr;
 std::vector<AliveAudioVoice *> AliveAudio::m_Voices;
 std::mutex AliveAudio::voiceListMutex;
 bool AliveAudio::Interpolation = true;
+bool AliveAudio::voiceListLocked = false;
 
 float AliveAudioSample::GetSample(float sampleOffset)
 {
@@ -38,7 +38,7 @@ void AliveInitAudio()
 	waveSpec.userdata = nullptr;
 	waveSpec.channels = 2;
 	waveSpec.freq = AliveAudioSampleRate;
-	waveSpec.samples = 1024;
+	waveSpec.samples = 2048;
 	waveSpec.format = AUDIO_F32;
 
 	/* Open the audio device */
@@ -117,28 +117,35 @@ void AliveAudioSDLCallback(void *udata, Uint8 *stream, int len)
 	memset(stream, 0, len);
 
 	AliveAudio::voiceListMutex.lock();
-	for (auto voice : AliveAudio::m_Voices)
-	{
-		for (int i = 0; i < StreamLength; i+=2)
-		{
-			float s = voice->GetSample();
+	int voiceCount = AliveAudio::m_Voices.size();
+	AliveAudioVoice ** rawPointer = AliveAudio::m_Voices.data(); // Real nice speed boost here.
 
-			//voice->m_Tone->Pan
+	for (int i = 0; i < StreamLength; i += 2)
+	{
+		for (int v = 0; v < voiceCount;v++)
+		{
+			AliveAudioVoice * voice = rawPointer[v]; // Raw pointer skips all that vector bottleneck crap
+			voice->m_TrackDelay--;
+
+			if (voice->Dead || voice->m_TrackDelay > 0)
+				continue;
 
 			float centerPan = voice->m_Tone->Pan;
-			float leftPan = 1;
-			float rightPan = 1;
-
-			// Panning is screwed. TODO: FIX THIS
+			float leftPan = 1.0f;
+			float rightPan = 1.0f;
 
 			if (centerPan > 0)
 			{
-				//leftPan = 1.0f - abs(centerPan);
+				leftPan = 1.0f - abs(centerPan);
 			}
 			if (centerPan < 0)
 			{
-				//rightPan = 1.0f - abs(centerPan);
+				rightPan = 1.0f - abs(centerPan);
 			}
+
+
+
+			float s = voice->GetSample();
 
 			float leftSample = s * leftPan;
 			float rightSample = s * rightPan;
@@ -147,9 +154,9 @@ void AliveAudioSDLCallback(void *udata, Uint8 *stream, int len)
 			SDL_MixAudioFormat((Uint8 *)(AudioStream + i + 1), (const Uint8*)&rightSample, AUDIO_F32, sizeof(float), 20); // Right Channel
 		}
 	}
-	
 	AliveAudio::voiceListMutex.unlock();
-	
+
+
 	CleanVoices();
 }
 
@@ -180,7 +187,6 @@ AliveAudioSoundbank::AliveAudioSoundbank(std::string fileName)
 			tone->Pan = (mVab.iProgs[i]->iTones[t]->iPan / 64.0f) - 1.0f;
 			tone->Min = mVab.iProgs[i]->iTones[t]->iMin;
 			tone->Max = mVab.iProgs[i]->iTones[t]->iMax;
-			tone->Pan = mVab.iProgs[i]->iTones[t]->iPan;
 			tone->m_Sample = m_Samples[mVab.iProgs[i]->iTones[t]->iVag - 1];
 			program->m_Tones.push_back(tone);
 		}

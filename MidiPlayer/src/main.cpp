@@ -25,8 +25,9 @@ int main(int argc, char* args[])
 	}
 	AliveInitAudio();
 
-	AppAbeSound app;
-	app.Run();
+	AppAbeSound * app = new AppAbeSound();
+	app->Run();
+	delete app;
 
 	SDL_Quit();
 

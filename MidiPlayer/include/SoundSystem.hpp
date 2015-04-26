@@ -14,6 +14,7 @@
 #include <vector>
 #include <iterator>
 #include <SDL.h>
+#include <algorithm>
 #include <mutex>  
 #include "vab.hpp"
 
@@ -96,6 +97,8 @@ public:
 	bool Loop = false;
 	bool NoteOn = true;
 	float Velocity = 1.0f;
+	int m_TrackID = 0; // This is used to distinguish between sounds fx and music
+	float m_TrackDelay = 0; // Used by the sequencer for perfect timing
 
 	float AttackSpeed = 1;
 	float ReleaseSpeed = 0;
@@ -163,9 +166,10 @@ public:
 		voiceListMutex.unlock();
 	}
 
-	static void NoteOn(int program, int note, char velocity)
+	static void NoteOn(int program, int note, char velocity, int trackID = 0, float trackDelay = 0)
 	{
-		voiceListMutex.lock();
+		if (!voiceListLocked)
+			voiceListMutex.lock();
 		for (auto tone : m_CurrentSoundbank->m_Programs[program]->m_Tones)
 		{
 			if (note >= tone->Min && note <= tone->Max)
@@ -175,31 +179,92 @@ public:
 				voice->m_Tone = tone;
 				voice->i_Program = program;
 				voice->Velocity = velocity / 127.0f;
+				voice->m_TrackID = trackID;
+				voice->m_TrackDelay = trackDelay;
 				m_Voices.push_back(voice);
 			}
 		}
-		voiceListMutex.unlock();
+		if (!voiceListLocked)
+			voiceListMutex.unlock();
 	}
 
-	static void NoteOff(int program, int note)
+	static void NoteOff(int program, int note, int trackID = 0)
 	{
-		voiceListMutex.lock();
+		if (!voiceListLocked)
+			voiceListMutex.lock();
 		for (auto voice : m_Voices)
 		{
-			if (voice->Note == note && voice->i_Program == program)
+			if (voice->Note == note && voice->i_Program == program && voice->m_TrackID == trackID)
 			{
 				voice->NoteOn = false;
 			}
 		}
-		voiceListMutex.unlock();
+		if (!voiceListLocked)
+			voiceListMutex.unlock();
 	}
 
 	static void DebugPlayFirstToneSample(int program, int tone)
 	{
 		PlayOneShot(program, (m_CurrentSoundbank->m_Programs[program]->m_Tones[tone]->Min + m_CurrentSoundbank->m_Programs[program]->m_Tones[tone]->Max) / 2,1);
 	}
+
+	static void LockNotes()
+	{
+		if (!voiceListLocked)
+		{
+			voiceListLocked = true;
+			voiceListMutex.lock();
+		}
+		else
+			throw "Voice list locked. Can't lock again.";
+	}
+
+	static void UnlockNotes()
+	{
+		if (voiceListLocked)
+		{
+			voiceListLocked = false;
+			voiceListMutex.unlock();
+		}
+		else
+			throw "Voice list unlocked. Can't unlock again.";
+	}
+
+	static void ClearAllTrackVoices(int trackID, bool forceKill = false)
+	{
+		LockNotes();
+
+		std::vector<AliveAudioVoice *> deadVoices;
+
+		for (auto voice : AliveAudio::m_Voices)
+		{
+			if (forceKill)
+			{
+				if (voice->m_TrackID == trackID) // Kill the voices no matter what. Cuts of any sounds = Ugly sound
+				{
+					deadVoices.push_back(voice);
+				}
+			}
+			else
+			{
+				if (voice->m_TrackID == trackID && voice->SampleOffset == 0) // Let the voices that are CURRENTLY playing play.
+				{
+					deadVoices.push_back(voice);
+				}
+			}
+		}
+
+		for (auto obj : deadVoices)
+		{
+			AliveAudio::m_Voices.erase(std::remove(AliveAudio::m_Voices.begin(), AliveAudio::m_Voices.end(), obj), AliveAudio::m_Voices.end());
+		}
+
+		UnlockNotes();
+	}
+
 	static AliveAudioSoundbank* m_CurrentSoundbank;
 	static std::mutex voiceListMutex;
 	static std::vector<AliveAudioVoice *> m_Voices;
 	static bool Interpolation;
+	static bool voiceListLocked;
 };

@@ -1,15 +1,15 @@
 #include "SequencePlayer.h"
-#include "oddlib\stream.hpp"
-#include "SoundSystem.hpp"
-#include "PreciseTimer.h"
 
 SequencePlayer::SequencePlayer()
 {
+	sequenceThread = new std::thread(&SequencePlayer::threadWork, this);
 }
-
 
 SequencePlayer::~SequencePlayer()
 {
+	killThread = true;
+	sequenceThread->join();
+	delete sequenceThread;
 }
 
 void snd_midi_skip_length(Oddlib::Stream& stream, int skip)
@@ -33,55 +33,83 @@ static Uint32 midi_read_var_len(Oddlib::Stream& stream)
 	return ret;
 }
 
-void TestPlay(std::vector<AliveAudioMidiMessage> MessageList)
+void SequencePlayer::threadWork()
 {
-	int tick = 0;
-	bool playing = true;
 	int channels[16];
 	memset(channels, 0, sizeof(channels));
-	mgPreciseTimer timer;
-	
-	while (playing)
+	static int delayTotal = 0;
+	while (!killThread)
 	{
-		timer.Start();
-
-		for (auto m : MessageList)
+		stateMutex.lock();
+		if (sequencerState == ALIVE_SEQUENCER_PLAYING)
 		{
-			if (m.TimeOffset == tick)
+			for (int i = 0; i < MessageList.size();i++)
 			{
+				AliveAudio::LockNotes();
+				AliveAudioMidiMessage m = MessageList[i];
+				delayTotal += m.TimeOffset;
 				switch (m.Type)
 				{
 				case ALIVE_MIDI_NOTE_ON:
-					AliveAudio::NoteOn(channels[m.Channel], m.Note, m.Velocity);
+					AliveAudio::NoteOn(channels[m.Channel], m.Note, m.Velocity, trackID, delayTotal * 30);
 					break;
 				case ALIVE_MIDI_NOTE_OFF:
-					AliveAudio::NoteOff(channels[m.Channel], m.Note);
+					//AliveAudio::NoteOff(channels[m.Channel], m.Note); // Fix this. Make note off's have an offset in the voice timeline.
 					break;
 				case ALIVE_MIDI_PROGRAM_CHANGE:
 					channels[m.Channel] = m.Special;
 					break;
 				case ALIVE_MIDI_ENDTRACK:
-					//playing = false;
-					tick = 0;
+					sequencerState = ALIVE_SEQUENCER_FINISHED;
+					delayTotal = 0;
 					break;
 				}
+				AliveAudio::UnlockNotes();
 			}
 		}
-
-		float makeUpTime = timer.GetDuration();
-		tick++;
-		while (timer.GetDuration() < 0.00065f - makeUpTime); // This is just a random delay. Needs to be calculated from seq file
+		stateMutex.unlock();
 	}
 }
 
-int SequencePlayer::PlayMidiFile()
+void SequencePlayer::StopSequence()
 {
+	AliveAudio::ClearAllTrackVoices(trackID);
+	stateMutex.lock();
+	sequencerState = ALIVE_SEQUENCER_STOPPED;
+	playTick = 0;
+	stateMutex.unlock();
+}
+
+void SequencePlayer::PlaySequence()
+{
+	stateMutex.lock();
+	if (sequencerState == ALIVE_SEQUENCER_STOPPED || sequencerState == ALIVE_SEQUENCER_FINISHED)
+	{
+		playTick = 0;
+	}
+
+	sequencerState = ALIVE_SEQUENCER_PLAYING;
+	stateMutex.unlock();
+}
+
+void SequencePlayer::PauseSequence()
+{
+	stateMutex.lock();
+	sequencerState = ALIVE_SEQUENCER_PAUSED;
+	stateMutex.unlock();
+}
+
+int SequencePlayer::LoadSequence(std::string filePath)
+{
+	StopSequence();
+	MessageList.clear();
 	std::ifstream soundDatFile;
-	soundDatFile.open("TEST.SEQ", std::ios::binary);
+	soundDatFile.open(filePath.c_str(), std::ios::binary);
 	if (!soundDatFile.is_open())
 	{
 		abort();
 	}
+
 	soundDatFile.seekg(0, std::ios::end);
 	std::streamsize fileSize = soundDatFile.tellg();
 	soundDatFile.seekg(0, std::ios::beg);
@@ -98,16 +126,24 @@ int SequencePlayer::PlayMidiFile()
 	stream.ReadBytes(header.mTempo, sizeof(header.mTempo));
 	stream.ReadUInt16(header.mRhythm);
 
+	int tempoValue = 0;
+	for (int i = 0; i < 3; i++)
+	{
+		tempoValue += header.mTempo[i] << (8 * i);
+	}
+
+	//tempoMilliseconds = (60000000.0f / tempoValue) / 1000.0f;
+
+	tempoMilliseconds = tempoValue / (header.mResolutionOfQuaterNote * 50000.0f);
+
 	int channels[16];
 
-	static unsigned int deltaTime = 0;
+	unsigned int deltaTime = 0;
 
 	const size_t midiDataStart = stream.Pos();
 
 	// Context state
 	SeqInfo gSeqInfo = {};
-
-	std::vector<AliveAudioMidiMessage> MessageList;
 
 	for (;;)
 	{
@@ -151,8 +187,7 @@ int SequencePlayer::PlayMidiFile()
 			case 0x2f:
 			{
 				//std::cout << "end of track" << std::endl;
-				MessageList.push_back(AliveAudioMidiMessage(ALIVE_MIDI_ENDTRACK, deltaTime, 0, 0, 0));
-				TestPlay(MessageList);
+				MessageList.push_back(AliveAudioMidiMessage(ALIVE_MIDI_ENDTRACK, delta, 0, 0, 0));
 				return 0;
 				int loopCount = gSeqInfo.iNumTimesToLoop;// v1 some hard coded data?? or just a local static?
 				if (loopCount) // If zero then loop forever
@@ -182,9 +217,11 @@ int SequencePlayer::PlayMidiFile()
 				//std::cout << "Temp change" << std::endl;
 				// TODO: Not sure if this is correct
 				Uint8 tempoByte = 0;
+				int t = 0;
 				for (int i = 0; i < 3; i++)
 				{
 					stream.ReadUInt8(tempoByte);
+					t = tempoByte << 8 * i;
 				}
 			}
 			break;
@@ -196,7 +233,6 @@ int SequencePlayer::PlayMidiFile()
 				// TODO Might be wrong
 				snd_midi_skip_length(stream, metaCommandLength);
 			}
-
 			}
 		}
 		else if (eventByte < 0x80)
@@ -209,95 +245,79 @@ int SequencePlayer::PlayMidiFile()
 			const Uint8 channel = eventByte & 0xf;
 			switch (eventByte >> 4)
 			{
-			case 0x9:
+			case 0x9: // Note On
 			{
 				Uint8 note = 0;
 				stream.ReadUInt8(note);
 
 				Uint8 velocity = 0;
 				stream.ReadUInt8(velocity);
-
-				//std::cout << Uint32(channel) << " NOTE ON " << Uint32(note) << " vel " << Uint32(velocity) << std::endl;
-
-				if (velocity == 0)
+				if (velocity == 0) // If velocity is 0, then the sequence means to do "Note Off"
 				{
-					MessageList.push_back(AliveAudioMidiMessage(ALIVE_MIDI_NOTE_OFF, deltaTime, channel, note, velocity));
-					//AliveAudio::NoteOff(channels[channel], note);
+					MessageList.push_back(AliveAudioMidiMessage(ALIVE_MIDI_NOTE_OFF, delta, channel, note, velocity));
 				}
 				else
 				{
-					MessageList.push_back(AliveAudioMidiMessage(ALIVE_MIDI_NOTE_ON, deltaTime, channel, note, velocity));
-					//AliveAudio::NoteOn(channels[channel], note, velocity);
+					MessageList.push_back(AliveAudioMidiMessage(ALIVE_MIDI_NOTE_ON, delta, channel, note, velocity));
 				}
 			}
 			break;
-			case 0x8:
+			case 0x8: // Note Off
 			{
 				Uint8 note = 0;
 				stream.ReadUInt8(note);
-
 				Uint8 velocity = 0;
 				stream.ReadUInt8(velocity);
 
-				//std::cout << Uint32(channel) << " NOTE OFF " << Uint32(note) << " vel " << Uint32(velocity) << std::endl;
-
-				//AliveAudio::NoteOff(channels[channel], note);
-				MessageList.push_back(AliveAudioMidiMessage(ALIVE_MIDI_NOTE_OFF, deltaTime, channel, note, velocity));
+				MessageList.push_back(AliveAudioMidiMessage(ALIVE_MIDI_NOTE_OFF, delta, channel, note, velocity));
 			}
 			break;
-			case 0xc:
+			case 0xc: // Program Change
 			{
 				Uint8 prog = 0;
 				stream.ReadUInt8(prog);
-				//std::cout << Uint32(channel) << " program change " << Uint32(prog) << std::endl;
-				//channels[channel] = prog;
-				MessageList.push_back(AliveAudioMidiMessage(ALIVE_MIDI_PROGRAM_CHANGE, deltaTime, channel, 0, 0, prog));
+				MessageList.push_back(AliveAudioMidiMessage(ALIVE_MIDI_PROGRAM_CHANGE, delta, channel, 0, 0, prog));
 			}
 			break;
-			case 0xa:
+			case 0xa: // Polyphonic key pressure (after touch)
 			{
 				Uint8 note = 0;
 				Uint8 pressure = 0;
 
 				stream.ReadUInt8(note);
 				stream.ReadUInt8(pressure);
-				std::cout << Uint32(channel) << " polyphonic key pressure (after touch)" << Uint32(note) << " " << Uint32(pressure) << std::endl;
 			}
 			break;
-			case 0xb:
+			case 0xb: // Controller Change
 			{
 				Uint8 controller = 0;
 				Uint8 value = 0;
 				stream.ReadUInt8(controller);
 				stream.ReadUInt8(value);
-				std::cout << Uint32(channel) << " controller change " << Uint32(controller) << " value " << Uint32(value);
 			}
 			break;
-			case 0xd:
+			case 0xd: // After touch
 			{
 				Uint8 value = 0;
 				stream.ReadUInt8(value);
-				std::cout << Uint32(channel) << " after touch " << Uint32(value) << std::endl;
 			}
 			break;
-			case 0xe:
+			case 0xe: // Pitch Bend
 			{
 				Uint16 bend = 0;
 				stream.ReadUInt16(bend);
-				std::cout << Uint32(channel) << " pitch bend " << Uint32(bend) << std::endl;
 			}
 			break;
-			case 0xf:
+			case 0xf: // Sysex len
 			{
 				const Uint32 length = midi_read_var_len(stream);
 				snd_midi_skip_length(stream, length);
-				std::cout << Uint32(channel) << " sysex len: " << length << std::endl;
 			}
 			break;
 			default:
 				throw std::runtime_error("Unknown MIDI command");
 			}
-			
+
 		}
 	}
 }

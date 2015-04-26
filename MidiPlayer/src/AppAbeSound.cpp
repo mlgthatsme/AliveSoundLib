@@ -7,19 +7,17 @@ TwBar * m_WindowMassProperties;
 
 TwBar * m_GUISound;
 
+SequencePlayer player;
+
 void TW_CALL PlaySound(void *clientData)
 {
 	AliveAudio::DebugPlayFirstToneSample(((int *)clientData)[0], ((int *)clientData)[1]);
 }
 
-void call_from_thread() {
-	SequencePlayer::PlayMidiFile();
-
-}
-
 void TW_CALL PlaySong(void *clientData)
 {
-	std::thread * tr = new std::thread(call_from_thread);
+	player.LoadSequence((char*)clientData);
+	player.PlaySequence();
 }
 
 int AppAbeSound::Start()
@@ -31,7 +29,9 @@ int AppAbeSound::Start()
 
 	//TwAddVarCB(m_GUISound, "interp", TW_TYPE_BOOLCPP, )
 	TwAddVarRW(m_GUISound, "interp", TW_TYPE_BOOLCPP, &AliveAudio::Interpolation, "group='Settings' label='Interpolation'");
-	TwAddButton(m_GUISound, nullptr, PlaySong, nullptr, "group='Settings' label='Play Song'");
+	TwAddButton(m_GUISound, nullptr, PlaySong, "TEST.SEQ", "group='Settings' label='Play Song 1'");
+	TwAddButton(m_GUISound, nullptr, PlaySong, "SECRET.SEQ", "group='Settings' label='Play Song 2'");
+	TwAddButton(m_GUISound, nullptr, PlaySong, "TEST.SEQ", "group='Settings' label='Play Song 3'");
 	for (int e = 15; e < 25; e++)
 	{
 		for (int i = 0; i < AliveAudio::m_CurrentSoundbank->m_Programs[e]->m_Tones.size(); i++)

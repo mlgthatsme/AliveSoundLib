@@ -1,6 +1,12 @@
 #pragma once
 
 #include <SDL.h>
+#include <string>
+#include <thread>
+#include <vector>
+#include "oddlib\stream.hpp"
+#include "SoundSystem.hpp"
+#include "PreciseTimer.h"
 
 struct SeqHeader
 {
@@ -25,6 +31,14 @@ enum AliveAudioMidiMessageType
 	ALIVE_MIDI_NOTE_OFF = 2,
 	ALIVE_MIDI_PROGRAM_CHANGE = 3,
 	ALIVE_MIDI_ENDTRACK = 4,
+};
+
+enum AliveAudioSequencerState
+{
+	ALIVE_SEQUENCER_STOPPED = 1,
+	ALIVE_SEQUENCER_PAUSED = 2,
+	ALIVE_SEQUENCER_PLAYING = 3,
+	ALIVE_SEQUENCER_FINISHED = 4,
 };
 
 struct AliveAudioMidiMessage
@@ -52,6 +66,21 @@ public:
 	SequencePlayer();
 	~SequencePlayer();
 
-	static int PlayMidiFile();
+	std::vector<AliveAudioMidiMessage> MessageList;
+	int LoadSequence(std::string filePath);
+	void PlaySequence();
+	void PauseSequence();
+	void StopSequence();
+private:
+	void threadWork();
+	int playTick = 0;
+	float tempoMilliseconds = 0;
+	std::thread * sequenceThread;
+	std::mutex midiListMutex;
+	std::mutex stateMutex;
+	int killThread = false;
+	mgPreciseTimer timer;
+	int trackID = 1;
+	AliveAudioSequencerState sequencerState = ALIVE_SEQUENCER_STOPPED;
 };
 
