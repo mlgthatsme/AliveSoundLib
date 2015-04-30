@@ -14,8 +14,8 @@ struct SeqHeader
 	Uint32 mVersion; // Seems to always be 1
 	Uint16 mResolutionOfQuaterNote;
 	Uint8 mTempo[3];
-	Uint16 mRhythm;
-
+	Uint8 mTimeSignatureBars;
+	Uint8 mTimeSignatureBeats;
 };
 
 struct SeqInfo
@@ -25,6 +25,7 @@ struct SeqInfo
 	Uint8 running_status = 0;
 };
 
+// The types of Midi Messages the sequencer will play.
 enum AliveAudioMidiMessageType
 {
 	ALIVE_MIDI_NOTE_ON = 1,
@@ -33,12 +34,13 @@ enum AliveAudioMidiMessageType
 	ALIVE_MIDI_ENDTRACK = 4,
 };
 
+// The current state of a SequencePlayer.
 enum AliveAudioSequencerState
 {
 	ALIVE_SEQUENCER_STOPPED = 1,
-	ALIVE_SEQUENCER_PAUSED = 2,
 	ALIVE_SEQUENCER_PLAYING = 3,
 	ALIVE_SEQUENCER_FINISHED = 4,
+	ALIVE_SEQUENCER_INIT_VOICES = 5,
 };
 
 struct AliveAudioMidiMessage
@@ -60,27 +62,39 @@ struct AliveAudioMidiMessage
 	int Special = 0;
 };
 
+// Gets called every time the play position is at 1/4 of the song.
+// Useful for changing sequences but keeping the time signature in sync.
+typedef void ( * AliveAudioQuarterCallback)();
+
 class SequencePlayer
 {
 public:
 	SequencePlayer();
 	~SequencePlayer();
 
-	std::vector<AliveAudioMidiMessage> MessageList;
-	int LoadSequence(std::string filePath);
+	int LoadSequenceData(std::vector<Uint8> seqData);
+	int LoadSequenceStream(Oddlib::Stream& stream);
 	void PlaySequence();
-	void PauseSequence();
 	void StopSequence();
-private:
-	void threadWork();
-	int playTick = 0;
-	float tempoMilliseconds = 0;
-	std::thread * sequenceThread;
-	std::mutex midiListMutex;
-	std::mutex stateMutex;
-	int killThread = false;
-	mgPreciseTimer timer;
-	int trackID = 1;
-	AliveAudioSequencerState sequencerState = ALIVE_SEQUENCER_STOPPED;
+
+	float MidiTimeToSample(int time);
+	int GetPlaybackPositionSample();
+
+	int m_TrackID = 1; // The track ID. Use this to seperate SoundFX from Music.
+	AliveAudioSequencerState m_PlayerState = ALIVE_SEQUENCER_STOPPED;
+	AliveAudioQuarterCallback m_QuarterCallback;
+
+//private:
+	int m_KillThread = false; // If true, loop thread will exit.
+	int m_SongFinishSample = 0; // Not relative.
+	int m_SongBeginSample = 0;	// Not relative.
+	int m_PrevBar = 0;
+	int m_TimeSignatureBars;
+	float m_SongTempo;
+	void m_PlayerThreadFunction();
+	std::vector<AliveAudioMidiMessage> m_MessageList;
+	std::thread * m_SequenceThread;
+	std::mutex m_MessageListMutex;
+	std::mutex m_PlayerStateMutex;
 };
 

@@ -2,22 +2,25 @@
 
 SequencePlayer::SequencePlayer()
 {
-	sequenceThread = new std::thread(&SequencePlayer::threadWork, this);
+	// Start the Sequencer thread.
+	m_SequenceThread = new std::thread(&SequencePlayer::m_PlayerThreadFunction, this);
 }
 
 SequencePlayer::~SequencePlayer()
 {
-	killThread = true;
-	sequenceThread->join();
-	delete sequenceThread;
+	m_KillThread = true;
+	m_SequenceThread->join();
+	delete m_SequenceThread;
 }
 
-void snd_midi_skip_length(Oddlib::Stream& stream, int skip)
+// Midi stuff
+static void _SndMidiSkipLength(Oddlib::Stream& stream, int skip)
 {
 	stream.Seek(stream.Pos() + skip);
 }
 
-static Uint32 midi_read_var_len(Oddlib::Stream& stream)
+// Midi stuff
+static Uint32 _MidiReadVarLen(Oddlib::Stream& stream)
 {
 	Uint32 ret = 0;
 	Uint8 byte = 0;
@@ -33,108 +36,135 @@ static Uint32 midi_read_var_len(Oddlib::Stream& stream)
 	return ret;
 }
 
-void SequencePlayer::threadWork()
+float SequencePlayer::MidiTimeToSample(int time)
+{
+	// This may, or may not be correct. // TODO: Revise
+	return ((60 * time) / m_SongTempo) * (AliveAudioSampleRate / 500.0f);
+}
+
+void SequencePlayer::m_PlayerThreadFunction()
 {
 	int channels[16];
-	memset(channels, 0, sizeof(channels));
-	static int delayTotal = 0;
-	while (!killThread)
+
+	while (!m_KillThread)
 	{
-		stateMutex.lock();
-		if (sequencerState == ALIVE_SEQUENCER_PLAYING)
+		m_PlayerStateMutex.lock();
+		if (m_PlayerState == ALIVE_SEQUENCER_INIT_VOICES)
 		{
-			for (int i = 0; i < MessageList.size();i++)
+			bool firstNote = true;
+			AliveAudio::LockNotes();
+			for (int i = 0; i < m_MessageList.size(); i++)
 			{
-				AliveAudio::LockNotes();
-				AliveAudioMidiMessage m = MessageList[i];
-				delayTotal += m.TimeOffset;
+				AliveAudioMidiMessage m = m_MessageList[i];
 				switch (m.Type)
 				{
 				case ALIVE_MIDI_NOTE_ON:
-					AliveAudio::NoteOn(channels[m.Channel], m.Note, m.Velocity, trackID, delayTotal * 30);
+					AliveAudio::NoteOn(channels[m.Channel], m.Note, m.Velocity, m_TrackID, MidiTimeToSample(m.TimeOffset));
+					if (firstNote)
+					{
+						m_SongBeginSample = AliveAudio::currentSampleIndex + MidiTimeToSample(m.TimeOffset);
+						firstNote = false;
+					}
 					break;
 				case ALIVE_MIDI_NOTE_OFF:
-					//AliveAudio::NoteOff(channels[m.Channel], m.Note); // Fix this. Make note off's have an offset in the voice timeline.
+					AliveAudio::NoteOffDelay(channels[m.Channel], m.Note, m_TrackID, MidiTimeToSample(m.TimeOffset)); // Fix this. Make note off's have an offset in the voice timeline.
 					break;
 				case ALIVE_MIDI_PROGRAM_CHANGE:
 					channels[m.Channel] = m.Special;
 					break;
 				case ALIVE_MIDI_ENDTRACK:
-					sequencerState = ALIVE_SEQUENCER_FINISHED;
-					delayTotal = 0;
+					m_PlayerState = ALIVE_SEQUENCER_PLAYING;
+					m_SongFinishSample = AliveAudio::currentSampleIndex + MidiTimeToSample(m.TimeOffset);
 					break;
 				}
-				AliveAudio::UnlockNotes();
+
+			}
+			AliveAudio::UnlockNotes();
+		}
+		m_PlayerStateMutex.unlock();
+
+		if (m_PlayerState == ALIVE_SEQUENCER_PLAYING && AliveAudio::currentSampleIndex > m_SongFinishSample)
+		{
+			m_PlayerState = ALIVE_SEQUENCER_FINISHED;
+
+			// Give a quarter beat anyway
+			if (m_QuarterCallback != nullptr)
+				m_QuarterCallback();
+		}
+
+		if (m_PlayerState == ALIVE_SEQUENCER_PLAYING)
+		{
+			int quarterBeat = (m_SongFinishSample - m_SongBeginSample) / m_TimeSignatureBars;
+			int currentQuarterBeat = (int)(floor(GetPlaybackPositionSample() / quarterBeat));
+
+			if (m_PrevBar != currentQuarterBeat)
+			{
+				m_PrevBar = currentQuarterBeat;
+
+				if (m_QuarterCallback != nullptr)
+					m_QuarterCallback();
 			}
 		}
-		stateMutex.unlock();
 	}
+}
+
+int SequencePlayer::GetPlaybackPositionSample()
+{
+	return AliveAudio::currentSampleIndex - m_SongBeginSample;
 }
 
 void SequencePlayer::StopSequence()
 {
-	AliveAudio::ClearAllTrackVoices(trackID);
-	stateMutex.lock();
-	sequencerState = ALIVE_SEQUENCER_STOPPED;
-	playTick = 0;
-	stateMutex.unlock();
+	AliveAudio::ClearAllTrackVoices(m_TrackID);
+	m_PlayerStateMutex.lock();
+	m_PlayerState = ALIVE_SEQUENCER_STOPPED;
+	m_PrevBar = 0;
+	m_PlayerStateMutex.unlock();
 }
 
 void SequencePlayer::PlaySequence()
 {
-	stateMutex.lock();
-	if (sequencerState == ALIVE_SEQUENCER_STOPPED || sequencerState == ALIVE_SEQUENCER_FINISHED)
+	m_PlayerStateMutex.lock();
+	if (m_PlayerState == ALIVE_SEQUENCER_STOPPED || m_PlayerState == ALIVE_SEQUENCER_FINISHED)
 	{
-		playTick = 0;
+		m_PrevBar = 0;
+		m_PlayerState = ALIVE_SEQUENCER_INIT_VOICES;
 	}
-
-	sequencerState = ALIVE_SEQUENCER_PLAYING;
-	stateMutex.unlock();
+	m_PlayerStateMutex.unlock();
 }
 
-void SequencePlayer::PauseSequence()
+int SequencePlayer::LoadSequenceData(std::vector<Uint8> seqData)
 {
-	stateMutex.lock();
-	sequencerState = ALIVE_SEQUENCER_PAUSED;
-	stateMutex.unlock();
-}
-
-int SequencePlayer::LoadSequence(std::string filePath)
-{
-	StopSequence();
-	MessageList.clear();
-	std::ifstream soundDatFile;
-	soundDatFile.open(filePath.c_str(), std::ios::binary);
-	if (!soundDatFile.is_open())
-	{
-		abort();
-	}
-
-	soundDatFile.seekg(0, std::ios::end);
-	std::streamsize fileSize = soundDatFile.tellg();
-	soundDatFile.seekg(0, std::ios::beg);
-	std::vector<unsigned char> seqData = std::vector<unsigned char>(fileSize + 20); // Plus one, just in case aliasing tries to go that one byte further!
-	soundDatFile.read((char*)seqData.data(), fileSize);
-
 	Oddlib::Stream stream(std::move(seqData));
 
+	return LoadSequenceStream(stream);
+}
+
+int SequencePlayer::LoadSequenceStream(Oddlib::Stream& stream)
+{
+	StopSequence();
+	m_MessageList.clear();
+	
+	SeqHeader seqHeader;
+
 	// Read the header
-	SeqHeader header;
-	stream.ReadUInt32(header.mMagic);
-	stream.ReadUInt32(header.mVersion);
-	stream.ReadUInt16(header.mResolutionOfQuaterNote);
-	stream.ReadBytes(header.mTempo, sizeof(header.mTempo));
-	stream.ReadUInt16(header.mRhythm);
+	
+	stream.ReadUInt32(seqHeader.mMagic);
+	stream.ReadUInt32(seqHeader.mVersion);
+	stream.ReadUInt16(seqHeader.mResolutionOfQuaterNote);
+	stream.ReadBytes(seqHeader.mTempo, sizeof(seqHeader.mTempo));
+	stream.ReadUInt8(seqHeader.mTimeSignatureBars);
+	stream.ReadUInt8(seqHeader.mTimeSignatureBeats);
 
 	int tempoValue = 0;
 	for (int i = 0; i < 3; i++)
 	{
-		tempoValue += header.mTempo[i] << (8 * i);
+		tempoValue += seqHeader.mTempo[2 - i] << (8 * i);
 	}
 
-	//tempoMilliseconds = (60000000.0f / tempoValue) / 1000.0f;
+	m_TimeSignatureBars = seqHeader.mTimeSignatureBars;
 
-	tempoMilliseconds = tempoValue / (header.mResolutionOfQuaterNote * 50000.0f);
+	m_SongTempo = 60000000.0 / tempoValue;
 
 	int channels[16];
 
@@ -148,7 +178,7 @@ int SequencePlayer::LoadSequence(std::string filePath)
 	for (;;)
 	{
 		// Read event delta time
-		Uint32 delta = midi_read_var_len(stream);
+		Uint32 delta = _MidiReadVarLen(stream);
 		deltaTime += delta;
 		//std::cout << "Delta: " << delta << " over all " << deltaTime << std::endl;
 
@@ -187,7 +217,7 @@ int SequencePlayer::LoadSequence(std::string filePath)
 			case 0x2f:
 			{
 				//std::cout << "end of track" << std::endl;
-				MessageList.push_back(AliveAudioMidiMessage(ALIVE_MIDI_ENDTRACK, delta, 0, 0, 0));
+				m_MessageList.push_back(AliveAudioMidiMessage(ALIVE_MIDI_ENDTRACK, deltaTime, 0, 0, 0));
 				return 0;
 				int loopCount = gSeqInfo.iNumTimesToLoop;// v1 some hard coded data?? or just a local static?
 				if (loopCount) // If zero then loop forever
@@ -231,7 +261,7 @@ int SequencePlayer::LoadSequence(std::string filePath)
 				//std::cout << "Unknown meta event " << Uint32(metaCommand) << std::endl;
 				// Skip unknown events
 				// TODO Might be wrong
-				snd_midi_skip_length(stream, metaCommandLength);
+				_SndMidiSkipLength(stream, metaCommandLength);
 			}
 			}
 		}
@@ -254,11 +284,11 @@ int SequencePlayer::LoadSequence(std::string filePath)
 				stream.ReadUInt8(velocity);
 				if (velocity == 0) // If velocity is 0, then the sequence means to do "Note Off"
 				{
-					MessageList.push_back(AliveAudioMidiMessage(ALIVE_MIDI_NOTE_OFF, delta, channel, note, velocity));
+					m_MessageList.push_back(AliveAudioMidiMessage(ALIVE_MIDI_NOTE_OFF, deltaTime, channel, note, velocity));
 				}
 				else
 				{
-					MessageList.push_back(AliveAudioMidiMessage(ALIVE_MIDI_NOTE_ON, delta, channel, note, velocity));
+					m_MessageList.push_back(AliveAudioMidiMessage(ALIVE_MIDI_NOTE_ON, deltaTime, channel, note, velocity));
 				}
 			}
 			break;
@@ -269,14 +299,14 @@ int SequencePlayer::LoadSequence(std::string filePath)
 				Uint8 velocity = 0;
 				stream.ReadUInt8(velocity);
 
-				MessageList.push_back(AliveAudioMidiMessage(ALIVE_MIDI_NOTE_OFF, delta, channel, note, velocity));
+				m_MessageList.push_back(AliveAudioMidiMessage(ALIVE_MIDI_NOTE_OFF, deltaTime, channel, note, velocity));
 			}
 			break;
 			case 0xc: // Program Change
 			{
 				Uint8 prog = 0;
 				stream.ReadUInt8(prog);
-				MessageList.push_back(AliveAudioMidiMessage(ALIVE_MIDI_PROGRAM_CHANGE, delta, channel, 0, 0, prog));
+				m_MessageList.push_back(AliveAudioMidiMessage(ALIVE_MIDI_PROGRAM_CHANGE, deltaTime, channel, 0, 0, prog));
 			}
 			break;
 			case 0xa: // Polyphonic key pressure (after touch)
@@ -310,8 +340,8 @@ int SequencePlayer::LoadSequence(std::string filePath)
 			break;
 			case 0xf: // Sysex len
 			{
-				const Uint32 length = midi_read_var_len(stream);
-				snd_midi_skip_length(stream, length);
+				const Uint32 length = _MidiReadVarLen(stream);
+				_SndMidiSkipLength(stream, length);
 			}
 			break;
 			default:

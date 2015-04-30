@@ -3,6 +3,8 @@
 // Third Party
 #include "gl_core_4_4.h"
 #include "glfw3.h"
+#include "glm.hpp"
+#include "ext.hpp"
 #include "AntTweakBar.h"
 
 // Standard
@@ -11,6 +13,7 @@
 #include <iostream>
 
 using namespace std;
+using namespace glm;
 
 class mgApplication
 {

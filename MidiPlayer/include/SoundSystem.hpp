@@ -17,6 +17,9 @@
 #include <algorithm>
 #include <mutex>  
 #include "vab.hpp"
+#include "json\jsonxx.h"
+#include "FileManager.h"
+#include "oddlib\lvlarchive.hpp"
 
 void AliveInitAudio();
 void AliveAudioSDLCallback(void *udata, Uint8 *stream, int len);
@@ -38,6 +41,11 @@ public:
 	static float SampleSint16ToFloat(Sint16 v)
 	{
 		return (v / 32767.0f);
+	}
+
+	static float RandFloat(float a, float b)
+	{
+		return ((b - a)*((float)rand() / RAND_MAX)) + a;
 	}
 };
 
@@ -61,18 +69,28 @@ class AliveAudioTone
 {
 public:
 	// volume 0-1
-	float Volume;
+	float f_Volume;
 
 	// panning -1 - 1
-	float Pan;
+	float f_Pan;
 
 	// Root Key
-	unsigned char Center;
-	unsigned char Shift;
+	unsigned char c_Center;
+	unsigned char c_Shift;
 
 	// Key range
 	unsigned char Min;
 	unsigned char Max;
+
+	float Pitch;
+
+	float AttackSpeed;
+	float ReleaseSpeed;
+	bool ReleaseExponential = false;
+	float DecaySpeed;
+	float SustainSpeed;
+
+	bool Loop = false;
 
 	AliveAudioSample * m_Sample;
 };
@@ -80,8 +98,12 @@ public:
 class AliveAudioSoundbank
 {
 public:
+	~AliveAudioSoundbank();
 	AliveAudioSoundbank(std::string fileName);
+	AliveAudioSoundbank(std::string lvlPath, std::string vabName);
+	AliveAudioSoundbank(Oddlib::LvlArchive& lvlArchive, std::string vabName);
 
+	void InitFromVab(Vab& vab);
 	std::vector<AliveAudioSample *> m_Samples;
 	std::vector<AliveAudioProgram *> m_Programs;
 };
@@ -90,57 +112,77 @@ class AliveAudioVoice
 {
 public:
 	AliveAudioTone * m_Tone;
-	int i_Program;
-	int Note = 0;
-	bool Dead = false;
-	float SampleOffset = 0;
-	bool Loop = false;
-	bool NoteOn = true;
-	float Velocity = 1.0f;
-	int m_TrackID = 0; // This is used to distinguish between sounds fx and music
-	float m_TrackDelay = 0; // Used by the sequencer for perfect timing
+	int		i_Program;
+	int		i_Note = 0;
+	bool	b_Dead = false;
+	float	f_SampleOffset = 0;
+	bool	b_NoteOn = true;
+	float	f_Velocity = 1.0f;
+	float	f_Pitch = 0.0f;
 
-	float AttackSpeed = 1;
-	float ReleaseSpeed = 0;
+	int		i_TrackID = 0; // This is used to distinguish between sounds fx and music
+	float	f_TrackDelay = 0; // Used by the sequencer for perfect timing
+	bool	m_UsesNoteOffDelay = false;
+	float	f_NoteOffDelay = 0;
 
-	float ActiveAttackVolume = 0;
-	float ActiveReleaseVolume = 1;
+	// Active ADSR Levels
+
+	float ActiveAttackLevel = 0;
+	float ActiveReleaseLevel = 1;
+	float ActiveDecayLevel = 1;
+	float ActiveSustainLevel = 1;
 
 	float GetSample()
 	{
-		if (Dead)	// Dont return anything if dead. This voice should now be removed.
+		if (b_Dead)	// Dont return anything if dead. This voice should now be removed.
 			return 0;
 
-		if (!NoteOn)
+		ActiveDecayLevel -= m_Tone->DecaySpeed;
+		if (ActiveDecayLevel < 0)
+			ActiveDecayLevel = 0;
+
+		if (!b_NoteOn)
 		{
-			ActiveReleaseVolume = AliveAudioHelper::Lerp<float>(ActiveReleaseVolume,0,ReleaseSpeed);
-			if (ActiveReleaseVolume <= 0.05f) // Release is done. So the voice is done.
+			// Todo. Do some math here to compensate for different device sample rates
+			//ActiveReleaseLevel = AliveAudioHelper::Lerp<float>(ActiveReleaseLevel, 0, m_Tone->ReleaseSpeed * ActiveReleaseLevel * 0.0003f); // <---
+
+			if (m_Tone->ReleaseExponential)
+				ActiveReleaseLevel -= (0.0002f * ActiveReleaseLevel) * m_Tone->ReleaseSpeed;
+			else
+				ActiveReleaseLevel -= (0.0002f * ActiveReleaseLevel) * 1;
+
+			if (ActiveReleaseLevel <= 0.05f) // Release is done. So the voice is done.
 			{
-				Dead = true;
-				ActiveReleaseVolume = 0;
+				b_Dead = true;
+				ActiveReleaseLevel = 0;
 			}
 		}
 		else
 		{
-			ActiveAttackVolume = AliveAudioHelper::Lerp<float>(ActiveAttackVolume, 1.0f, AttackSpeed);
-			if (ActiveAttackVolume > 1)
-				ActiveAttackVolume = 1;
+			/*ActiveSustainLevel -= m_Tone->SustainSpeed;
+			if (ActiveSustainLevel < 0)
+				ActiveSustainLevel = 0;*/
+
+			ActiveAttackLevel = AliveAudioHelper::Lerp<float>(ActiveAttackLevel, 1.0f, m_Tone->AttackSpeed); // TODO: Fix attack speed
+
+			if (ActiveAttackLevel > 1)
+				ActiveAttackLevel = 1;
 		}
 
-		if (SampleOffset >= m_Tone->m_Sample->i_SampleSize)
+		if (f_SampleOffset >= m_Tone->m_Sample->i_SampleSize)
 		{
-			if (Loop)
-				SampleOffset = 0;
+			if (m_Tone->Loop)
+				f_SampleOffset = 0;
 			else
 			{
-				Dead = true;
+				b_Dead = true;
 				return 0; // Voice is dead now, so don't return anything.
 			}
 		}
 		float sampleRate = 0;
-		float sampleFrameRate = pow(1.059463f, Note - m_Tone->Center) * (44100.0f / AliveAudioSampleRate);
-		SampleOffset += (sampleFrameRate);
-		return m_Tone->m_Sample->GetSample(SampleOffset) * ActiveAttackVolume * ActiveReleaseVolume * Velocity;
+		float sampleFrameRate = pow(1.059463f, i_Note - m_Tone->c_Center + m_Tone->Pitch + f_Pitch) * (44100.0f / AliveAudioSampleRate);
+		f_SampleOffset += (sampleFrameRate);
+		return m_Tone->m_Sample->GetSample(f_SampleOffset) * ActiveAttackLevel * ActiveDecayLevel * ((b_NoteOn) ? ActiveSustainLevel : ActiveReleaseLevel) * f_Velocity;
 	}
 };
 
@@ -148,7 +190,7 @@ static class AliveAudio
 {
 public:
 	static std::vector<unsigned char> m_SoundsDat;
-	static void PlayOneShot(int program, int note, float volume)
+	static void PlayOneShot(int program, int note, float volume, float pitch = 0)
 	{
 		voiceListMutex.lock();
 		for (auto tone : m_CurrentSoundbank->m_Programs[program]->m_Tones)
@@ -156,17 +198,40 @@ public:
 			if (note >= tone->Min && note <= tone->Max)
 			{
 				AliveAudioVoice * voice = new AliveAudioVoice();
-				voice->Note = note;
-				voice->Velocity = volume;
+				voice->i_Note = note;
+				voice->f_Velocity = volume;
 				voice->m_Tone = tone;
-				printf("Sample Rate %i\n", voice->m_Tone->m_Sample->i_SampleRate);
+				voice->f_Pitch = pitch;
 				m_Voices.push_back(voice);
 			}
 		}
 		voiceListMutex.unlock();
 	}
 
-	static void NoteOn(int program, int note, char velocity, int trackID = 0, float trackDelay = 0)
+	static void PlayOneShot(std::string soundID)
+	{
+		jsonxx::Array soundList = AliveAudio::m_MusicJson.get<jsonxx::Array>("sounds");
+
+		for (int i = 0; i < soundList.size(); i++)
+		{
+			jsonxx::Object sndObj = soundList.get<jsonxx::Object>(i);
+			if (sndObj.get<jsonxx::String>("id") == soundID)
+			{
+				float randA = 0;
+				float randB = 0;
+				
+				if (sndObj.has<jsonxx::Array>("pitchrand"))
+				{
+					randA = (float)sndObj.get<jsonxx::Array>("pitchrand").get<jsonxx::Number>(0);
+					randB = (float)sndObj.get<jsonxx::Array>("pitchrand").get<jsonxx::Number>(1);
+				}
+
+				PlayOneShot((int)sndObj.get<jsonxx::Number>("prog"), (int)sndObj.get<jsonxx::Number>("note"), 1.0f, AliveAudioHelper::RandFloat(randA,randB));
+			}
+		}
+	}
+
+	static void NoteOn(int program, int note, char velocity, float pitch = 0, int trackID = 0, float trackDelay = 0)
 	{
 		if (!voiceListLocked)
 			voiceListMutex.lock();
@@ -175,17 +240,22 @@ public:
 			if (note >= tone->Min && note <= tone->Max)
 			{
 				AliveAudioVoice * voice = new AliveAudioVoice();
-				voice->Note = note;
+				voice->i_Note = note;
 				voice->m_Tone = tone;
 				voice->i_Program = program;
-				voice->Velocity = velocity / 127.0f;
-				voice->m_TrackID = trackID;
-				voice->m_TrackDelay = trackDelay;
+				voice->f_Velocity = velocity / 127.0f;
+				voice->i_TrackID = trackID;
+				voice->f_TrackDelay = trackDelay;
 				m_Voices.push_back(voice);
 			}
 		}
 		if (!voiceListLocked)
 			voiceListMutex.unlock();
+	}
+
+	static void NoteOn(int program, int note, char velocity, int trackID = 0, float trackDelay = 0)
+	{
+		NoteOn(program, note, velocity, 0, trackID, trackDelay);
 	}
 
 	static void NoteOff(int program, int note, int trackID = 0)
@@ -194,9 +264,25 @@ public:
 			voiceListMutex.lock();
 		for (auto voice : m_Voices)
 		{
-			if (voice->Note == note && voice->i_Program == program && voice->m_TrackID == trackID)
+			if (voice->i_Note == note && voice->i_Program == program && voice->i_TrackID == trackID)
 			{
-				voice->NoteOn = false;
+				voice->b_NoteOn = false;
+			}
+		}
+		if (!voiceListLocked)
+			voiceListMutex.unlock();
+	}
+
+	static void NoteOffDelay(int program, int note, int trackID = 0, float trackDelay = 0)
+	{
+		if (!voiceListLocked)
+			voiceListMutex.lock();
+		for (auto voice : m_Voices)
+		{
+			if (voice->i_Note == note && voice->i_Program == program && voice->i_TrackID == trackID && voice->f_TrackDelay < trackDelay && voice->f_NoteOffDelay <= 0)
+			{
+				voice->m_UsesNoteOffDelay = true;
+				voice->f_NoteOffDelay = trackDelay;
 			}
 		}
 		if (!voiceListLocked)
@@ -215,8 +301,8 @@ public:
 			voiceListLocked = true;
 			voiceListMutex.lock();
 		}
-		else
-			throw "Voice list locked. Can't lock again.";
+		//else
+			//throw "Voice list locked. Can't lock again.";
 	}
 
 	static void UnlockNotes()
@@ -226,8 +312,40 @@ public:
 			voiceListLocked = false;
 			voiceListMutex.unlock();
 		}
-		else
-			throw "Voice list unlocked. Can't unlock again.";
+		//else
+			//throw "Voice list unlocked. Can't unlock again.";
+	}
+
+	static void ClearAllVoices(bool forceKill = true)
+	{
+		LockNotes();
+
+		std::vector<AliveAudioVoice *> deadVoices;
+
+		for (auto voice : AliveAudio::m_Voices)
+		{
+			if (forceKill)
+			{
+				deadVoices.push_back(voice);
+			}
+			else
+			{
+				voice->b_NoteOn = false; // Send a note off to all of the notes though.
+				if (voice->f_SampleOffset == 0) // Let the voices that are CURRENTLY playing play.
+				{
+					deadVoices.push_back(voice);
+				}
+			}
+		}
+
+		for (auto obj : deadVoices)
+		{
+			delete obj;
+
+			AliveAudio::m_Voices.erase(std::remove(AliveAudio::m_Voices.begin(), AliveAudio::m_Voices.end(), obj), AliveAudio::m_Voices.end());
+		}
+
+		UnlockNotes();
 	}
 
 	static void ClearAllTrackVoices(int trackID, bool forceKill = false)
@@ -240,14 +358,15 @@ public:
 		{
 			if (forceKill)
 			{
-				if (voice->m_TrackID == trackID) // Kill the voices no matter what. Cuts of any sounds = Ugly sound
+				if (voice->i_TrackID == trackID) // Kill the voices no matter what. Cuts of any sounds = Ugly sound
 				{
 					deadVoices.push_back(voice);
 				}
 			}
 			else
 			{
-				if (voice->m_TrackID == trackID && voice->SampleOffset == 0) // Let the voices that are CURRENTLY playing play.
+				voice->b_NoteOn = false; // Send a note off to all of the notes though.
+				if (voice->i_TrackID == trackID && voice->f_SampleOffset == 0) // Let the voices that are CURRENTLY playing play.
 				{
 					deadVoices.push_back(voice);
 				}
@@ -256,15 +375,54 @@ public:
 
 		for (auto obj : deadVoices)
 		{
+			delete obj;
+
 			AliveAudio::m_Voices.erase(std::remove(AliveAudio::m_Voices.begin(), AliveAudio::m_Voices.end(), obj), AliveAudio::m_Voices.end());
 		}
 
 		UnlockNotes();
 	}
 
+	static void LoadSoundbank(char * fileName)
+	{
+		ClearAllVoices(true);
+
+		if (AliveAudio::m_CurrentSoundbank != nullptr)
+			delete AliveAudio::m_CurrentSoundbank;
+
+		AliveAudioSoundbank * soundBank = new AliveAudioSoundbank(fileName);
+		AliveAudio::m_CurrentSoundbank = soundBank;
+	}
+
+	static void SetSoundbank(AliveAudioSoundbank * soundbank)
+	{
+		ClearAllVoices(true);
+
+		if (AliveAudio::m_CurrentSoundbank != nullptr)
+			delete AliveAudio::m_CurrentSoundbank;
+
+		AliveAudio::m_CurrentSoundbank = soundbank;
+	}
+
+	static void LoadAllFromLvl(std::string lvlPath, std::string vabID, std::string seqFile)
+	{
+		m_LoadedSeqData.clear();
+		Oddlib::LvlArchive archive(lvlPath);
+		SetSoundbank(new AliveAudioSoundbank(archive, vabID));
+		for (int i = 0; i < archive.FileByName(seqFile)->GetChunkCount(); i++)
+		{
+			m_LoadedSeqData.push_back(archive.FileByName(seqFile)->ChunkByIndex(i)->ReadData());
+		}
+	}
+
 	static AliveAudioSoundbank* m_CurrentSoundbank;
+	//static std::vector<AliveAudioTrack*> m_CurrentTrackList;
+	static std::vector<std::vector<Uint8>> m_LoadedSeqData;
 	static std::mutex voiceListMutex;
 	static std::vector<AliveAudioVoice *> m_Voices;
 	static bool Interpolation;
 	static bool voiceListLocked;
+	static long long currentSampleIndex;
+
+	static jsonxx::Object m_MusicJson;
 };
