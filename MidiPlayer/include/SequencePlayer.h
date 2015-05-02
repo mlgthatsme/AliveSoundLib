@@ -5,7 +5,7 @@
 #include <thread>
 #include <vector>
 #include "oddlib\stream.hpp"
-#include "SoundSystem.hpp"
+#include "alive\AliveAudio.h"
 #include "PreciseTimer.h"
 
 struct SeqHeader

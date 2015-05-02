@@ -45,7 +45,7 @@
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
       <SDLCheck>false</SDLCheck>
-      <AdditionalIncludeDirectories>include\;thirdparty\SDL2-2.0.3\include\;thirdparty\SDL2_mixer-2.0.0\include\;thirdparty\AntTweakBar\include\;thirdparty\glfw\include\;thirdparty\loadgen\include\;thirdparty\glm\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>include\;thirdparty\SDL2-2.0.3\include\;thirdparty\SDL2_mixer-2.0.0\include\;thirdparty\AntTweakBar\include\;thirdparty\glfw\include\;thirdparty\loadgen\include\;thirdparty\glm\;include\alive\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -61,7 +61,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>false</SDLCheck>
-      <AdditionalIncludeDirectories>include\;thirdparty\SDL2-2.0.3\include\;thirdparty\SDL2_mixer-2.0.0\include\;thirdparty\AntTweakBar\include\;thirdparty\glfw\include\;thirdparty\loadgen\include\;thirdparty\glm\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>include\;thirdparty\SDL2-2.0.3\include\;thirdparty\SDL2_mixer-2.0.0\include\;thirdparty\AntTweakBar\include\;thirdparty\glfw\include\;thirdparty\loadgen\include\;thirdparty\glm\;include\alive\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -73,7 +73,14 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="src\ADSR.cpp" />
+    <ClCompile Include="src\alive\ADSR.cpp" />
+    <ClCompile Include="src\alive\AliveAudio.cpp" />
+    <ClCompile Include="src\alive\Helper.cpp" />
+    <ClCompile Include="src\alive\Program.cpp" />
+    <ClCompile Include="src\alive\Sample.cpp" />
+    <ClCompile Include="src\alive\Soundbank.cpp" />
+    <ClCompile Include="src\alive\Tone.cpp" />
+    <ClCompile Include="src\alive\Voice.cpp" />
     <ClCompile Include="src\AppAbeSound.cpp" />
     <ClCompile Include="src\Application.cpp" />
     <ClCompile Include="src\FileManager.cpp" />
@@ -85,13 +92,19 @@
     <ClCompile Include="src\PreciseTimer.cpp" />
     <ClCompile Include="src\SequencePlayer.cpp" />
     <ClCompile Include="src\ShaderProgram.cpp" />
-    <ClCompile Include="src\SoundSystem.cpp" />
     <ClCompile Include="src\vab.cpp" />
     <ClCompile Include="src\VertexData.cpp" />
     <ClCompile Include="thirdparty\loadgen\gl_core_4_4.c" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="include\ADSR.h" />
+    <ClInclude Include="include\alive\ADSR.h" />
+    <ClInclude Include="include\alive\AliveAudio.h" />
+    <ClInclude Include="include\alive\Helper.h" />
+    <ClInclude Include="include\alive\Program.h" />
+    <ClInclude Include="include\alive\Sample.h" />
+    <ClInclude Include="include\alive\Soundbank.h" />
+    <ClInclude Include="include\alive\Tone.h" />
+    <ClInclude Include="include\alive\Voice.h" />
     <ClInclude Include="include\AppAbeSound.h" />
     <ClInclude Include="include\Application.h" />
     <ClInclude Include="include\FileManager.h" />
@@ -101,7 +114,6 @@
     <ClInclude Include="include\reverb.h" />
     <ClInclude Include="include\SequencePlayer.h" />
     <ClInclude Include="include\ShaderProgram.h" />
-    <ClInclude Include="include\SoundSystem.hpp" />
     <ClInclude Include="include\vab.hpp" />
     <ClInclude Include="include\VertexData.h" />
     <ClInclude Include="resource.h" />

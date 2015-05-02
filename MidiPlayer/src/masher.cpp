@@ -5,7 +5,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <vector>
-#include "SoundSystem.hpp"
+#include "alive\AliveAudio.h"
 
 using namespace std;
 
