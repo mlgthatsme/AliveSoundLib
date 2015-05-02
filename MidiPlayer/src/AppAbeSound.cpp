@@ -15,6 +15,7 @@ TwBar * m_GUIScenario;
 TwBar * m_GUITheme;
 TwBar * m_GUISoundList;
 TwBar * m_GUIVoiceList;
+TwBar * m_GUIFileList;
 
 mgVertexData * basicRect;
 mgShaderProgram * renderShader;
@@ -79,7 +80,17 @@ void TW_CALL ChangeTheme(void *clientData)
 	player->StopSequence();
 
 	jsonxx::Object theme = AliveAudio::m_Config.get<jsonxx::Array>("themes").get<jsonxx::Object>((int)clientData);
-	AliveAudio::LoadAllFromLvl(theme.get<jsonxx::String>("lvl", "null") + ".LVL", theme.get<jsonxx::String>("vab", "null"), theme.get<jsonxx::String>("seq", "null"));
+
+	Oddlib::LvlArchive archive(theme.get<jsonxx::String>("lvl", "null") + ".LVL");
+	AliveAudio::LoadAllFromLvl(archive, theme.get<jsonxx::String>("vab", "null"), theme.get<jsonxx::String>("seq", "null"));
+
+	TwRemoveAllVars(m_GUIFileList);
+	for (int i = 0; i < archive.mFiles.size(); i++)
+	{
+		char labelTest[100];
+		sprintf(labelTest, "group='Files' label='%s'",archive.mFiles[i].get()->FileName().c_str());
+		TwAddButton(m_GUIFileList, nullptr, nullptr, nullptr, labelTest);
+	}
 
 	TwRemoveAllVars(m_GUITones);
 	for (int e = 0; e < 128; e++)
@@ -142,6 +153,7 @@ int AppAbeSound::Start()
 	m_GUITheme = TwNewBar("Themes");
 	m_GUISoundList = TwNewBar("SoundList");
 	m_GUIVoiceList = TwNewBar("Voices");
+	m_GUIFileList = TwNewBar("Files");
 
 	TwDefine("Scenarios position='16 226' ");
 
@@ -149,15 +161,17 @@ int AppAbeSound::Start()
 	TwDefine("Sequences position='446 16' ");
 	TwDefine("Themes position='660 16' ");
 	TwDefine("SoundList position='876 16' ");
-	TwDefine("Voices position='1090 16' ");
+	TwDefine("Voices position='1190 16' ");
+	TwDefine("Files position='1500 16' ");
 
 	TwDefine("Info size='205 200' ");
 	TwDefine("Tones size='205 600' ");
 	TwDefine("Sequences size='205 600' ");
 	TwDefine("Scenarios size='205 200' ");
 	TwDefine("Themes size='205 600' ");
-	TwDefine("SoundList size='205 600' ");
+	TwDefine("SoundList size='305 600' ");
 	TwDefine("Voices size='305 600' ");
+	TwDefine("Files size='205 600' ");
 
 	jsonxx::Array soundList = AliveAudio::m_Config.get<jsonxx::Array>("sounds");
 

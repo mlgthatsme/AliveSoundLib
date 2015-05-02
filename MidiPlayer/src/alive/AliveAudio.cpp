@@ -378,8 +378,13 @@ void AliveAudio::SetSoundbank(AliveAudioSoundbank * soundbank)
 
 void AliveAudio::LoadAllFromLvl(std::string lvlPath, std::string vabID, std::string seqFile)
 {
-	m_LoadedSeqData.clear();
 	Oddlib::LvlArchive archive(lvlPath);
+	LoadAllFromLvl(archive, vabID, seqFile);
+}
+
+void AliveAudio::LoadAllFromLvl(Oddlib::LvlArchive& archive, std::string vabID, std::string seqFile)
+{
+	m_LoadedSeqData.clear();
 	SetSoundbank(new AliveAudioSoundbank(archive, vabID));
 	for (int i = 0; i < archive.FileByName(seqFile)->GetChunkCount(); i++)
 	{

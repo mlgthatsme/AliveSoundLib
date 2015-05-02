@@ -90,6 +90,16 @@
 		 "slig" : 16,
 		 "intense" : 17
       },
+	  {// Mines Italian Test
+		 "name":"Mines Italian",
+         "lvl":"MI_ITALIAN",
+         "vab":"MINES",
+         "seq":"MISEQ.BSQ",
+		 "idle" : [12,13,14],
+		 "suspense" : 15,
+		 "slig" : 16,
+		 "intense" : 17
+      },
       {// Necrum
 		 "name":"Necrum",
          "lvl":"NE",

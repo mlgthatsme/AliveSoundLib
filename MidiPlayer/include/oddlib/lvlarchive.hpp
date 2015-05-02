@@ -82,7 +82,7 @@ namespace Oddlib
             Sint8 iFileNameBytes[KMaxLvlArchiveFileNameLength] = {};
         };
 
-    private:
+    
         struct LvlHeader
         {
             Uint32 iFirstFileOffset = 0;

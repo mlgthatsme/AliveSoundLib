@@ -52,7 +52,8 @@ public:
 	static void SetSoundbank(AliveAudioSoundbank * soundbank);
 
 	static void LoadAllFromLvl(std::string lvlPath, std::string vabID, std::string seqFile);
-	
+	static void LoadAllFromLvl(Oddlib::LvlArchive& lvlArchive, std::string vabID, std::string seqFile);
+
 	static biquad * AliveAudioEQBiQuad;
 	static std::mutex EQMutex;
 
@@ -81,7 +82,7 @@ static void AliveAudioSetEQ(float cutoff)
 static void AliveEQEffect(float * stream, int len)
 {
 	if (AliveAudio::AliveAudioEQBiQuad == nullptr)
-		AliveAudioSetEQ(20000);
+		AliveAudioSetEQ(20500);
 
 	AliveAudio::EQMutex.lock();
 
