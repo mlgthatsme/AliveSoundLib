@@ -4,6 +4,7 @@
 #include <thread>
 #include "VertexData.h"
 #include "ShaderProgram.h"
+#include "alive\EQ.h"
 
 TwBar * m_WindowMassProperties;
 
@@ -114,6 +115,19 @@ void BarLoop()
 	}
 }
 
+int CurrentEQCutoff = 0;
+
+void TW_CALL SetEQ(const void *value, void *clientData)
+{
+	CurrentEQCutoff = *(int*)value;
+	AliveAudioSetEQ(*(int*)value);
+}
+
+void TW_CALL GetEQ(void *value, void *clientData)
+{
+	*(int*)value = CurrentEQCutoff;
+}
+
 int AppAbeSound::Start()
 {
 	mgApplication::Start();
@@ -160,7 +174,8 @@ int AppAbeSound::Start()
 	TwAddVarRW(m_GUIInfo, "interp", TW_TYPE_BOOLCPP, &AliveAudio::Interpolation, "group='Settings' label='Interpolation'");
 	TwAddVarRW(m_GUIInfo, "loop", TW_TYPE_BOOLCPP, &loopSong, "group='Settings' label='Loop'");
 	TwAddVarCB(m_GUIInfo, "voices", TW_TYPE_INT32, nullptr, GetVoiceCount, nullptr, "group='Info' label='Voices'");
-
+	TwAddVarCB(m_GUIInfo, "eq", TW_TYPE_INT32, SetEQ, GetEQ, nullptr, "group='Audio Settings' label = 'EQ Cutoff' min='0' step='100'");
+	TwAddVarRW(m_GUIInfo, "eqen", TW_TYPE_BOOLCPP, &AliveAudio::EQEnabled, "group='Audio Settings' label='EQ Enabled'");
 	jsonxx::Array themeList = AliveAudio::m_Config.get<jsonxx::Array>("themes");
 
 	for (int i = 0; i < themeList.size(); i++)

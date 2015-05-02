@@ -1,12 +1,15 @@
 #include "AliveAudio.h"
 
+biquad * AliveAudio::AliveAudioEQBiQuad = nullptr;
 std::vector<unsigned char> AliveAudio::m_SoundsDat;
 AliveAudioSoundbank * AliveAudio::m_CurrentSoundbank = nullptr;
 jsonxx::Object AliveAudio::m_Config;
 std::vector<AliveAudioVoice *> AliveAudio::m_Voices;
 std::mutex AliveAudio::voiceListMutex;
+std::mutex AliveAudio::EQMutex;
 std::vector<std::vector<Uint8>> AliveAudio::m_LoadedSeqData;
 bool AliveAudio::Interpolation = true;
+bool AliveAudio::EQEnabled = true;
 bool AliveAudio::voiceListLocked = false;
 long long AliveAudio::currentSampleIndex = 0;
 
@@ -154,6 +157,9 @@ void AliveAudioSDLCallback(void *udata, Uint8 *stream, int len)
 {
 	memset(stream, 0, len);
 	AliveRenderAudio((float *)stream, len / sizeof(float));
+
+	if (AliveAudio::EQEnabled)
+		AliveEQEffect((float *)stream, len / sizeof(float));
 }
 
 void AliveAudio::PlayOneShot(int program, int note, float volume, float pitch)

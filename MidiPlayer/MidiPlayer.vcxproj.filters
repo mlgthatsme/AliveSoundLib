@@ -96,6 +96,9 @@
     <ClCompile Include="src\alive\ADSR.cpp">
       <Filter>Source Files\Audio</Filter>
     </ClCompile>
+    <ClCompile Include="src\alive\biquad.cpp">
+      <Filter>Source Files\Audio</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\vab.hpp">
@@ -156,6 +159,12 @@
       <Filter>Header Files\Audio</Filter>
     </ClInclude>
     <ClInclude Include="include\alive\ADSR.h">
+      <Filter>Header Files\Audio</Filter>
+    </ClInclude>
+    <ClInclude Include="include\alive\EQ.h">
+      <Filter>Header Files\Audio</Filter>
+    </ClInclude>
+    <ClInclude Include="include\alive\biquad.h">
       <Filter>Header Files\Audio</Filter>
     </ClInclude>
   </ItemGroup>

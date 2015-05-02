@@ -75,6 +75,7 @@
   <ItemGroup>
     <ClCompile Include="src\alive\ADSR.cpp" />
     <ClCompile Include="src\alive\AliveAudio.cpp" />
+    <ClCompile Include="src\alive\biquad.cpp" />
     <ClCompile Include="src\alive\Helper.cpp" />
     <ClCompile Include="src\alive\Program.cpp" />
     <ClCompile Include="src\alive\Sample.cpp" />
@@ -99,6 +100,8 @@
   <ItemGroup>
     <ClInclude Include="include\alive\ADSR.h" />
     <ClInclude Include="include\alive\AliveAudio.h" />
+    <ClInclude Include="include\alive\biquad.h" />
+    <ClInclude Include="include\alive\EQ.h" />
     <ClInclude Include="include\alive\Helper.h" />
     <ClInclude Include="include\alive\Program.h" />
     <ClInclude Include="include\alive\Sample.h" />
