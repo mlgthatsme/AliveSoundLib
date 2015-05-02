@@ -37,25 +37,6 @@ void TW_CALL PlayNote(void *clientData)
 	AliveAudio::PlayOneShot(*(std::string * )clientData);
 }
 
-void TW_CALL ChangeTheme(void *clientData)
-{
-	player->StopSequence();
-
-	jsonxx::Object theme = AliveAudio::m_MusicJson.get<jsonxx::Array>("themes").get<jsonxx::Object>((int)clientData);
-	AliveAudio::LoadAllFromLvl(theme.get<jsonxx::String>("lvl", "null") + ".LVL", theme.get<jsonxx::String>("vab", "null"), theme.get<jsonxx::String>("seq", "null"));
-
-	TwRemoveAllVars(m_GUITones);
-	for (int e = 0; e < 128; e++)
-	{
-		for (int i = 0; i < AliveAudio::m_CurrentSoundbank->m_Programs[e]->m_Tones.size(); i++)
-		{
-			char labelTest[100];
-			sprintf(labelTest, "group='Program %i' label='%i - Min:%i Max:%i'", e, i, AliveAudio::m_CurrentSoundbank->m_Programs[e]->m_Tones[i]->Min, AliveAudio::m_CurrentSoundbank->m_Programs[e]->m_Tones[i]->Max);
-			TwAddButton(m_GUITones, nullptr, PlaySound, (void*)new int[2]{ e, i }, labelTest);
-		}
-	}
-}
-
 void TW_CALL StopMusic(void *clientData)
 {
 	player->StopSequence();
@@ -76,44 +57,6 @@ void TW_CALL KillVoice(void * voice)
 	((AliveAudioVoice*)voice)->b_NoteOn = false;
 }
 
-void SaveSeqTest()
-{
-	jsonxx::Array body;
-	for (auto m : player->m_MessageList)
-	{
-		jsonxx::Object midiMessage;
-		midiMessage << "Time" << m.TimeOffset;
-		switch (m.Type)
-		{
-		case ALIVE_MIDI_NOTE_ON:
-			midiMessage << "Type" << "NOTE_ON";
-			break;
-		case ALIVE_MIDI_NOTE_OFF:
-			midiMessage << "Type" << "NOTE_OFF";
-			break;
-		case ALIVE_MIDI_PROGRAM_CHANGE:
-			midiMessage << "Type" << "PROGRAM_CHANGE";
-			break;
-		case ALIVE_MIDI_ENDTRACK:
-			midiMessage << "Type" << "END_TRACK";
-			break;
-		default:
-			midiMessage << "Type" << "UNKNOWN";
-			break;
-		}
-		midiMessage << "Channel" << m.Channel;
-		midiMessage << "Note" << m.Note;
-		midiMessage << "Velocity" << m.Velocity;
-		midiMessage << "Special" << m.Special;
-
-		body << midiMessage;
-	}
-
-	std::ofstream file("songtest.json");
-	file << body.json();
-	file.close();
-}
-
 void TW_CALL PlaySong(void *clientData)
 {
 	if (firstChange || player->m_PlayerState == ALIVE_SEQUENCER_FINISHED || player->m_PlayerState == ALIVE_SEQUENCER_STOPPED)
@@ -122,12 +65,39 @@ void TW_CALL PlaySong(void *clientData)
 		{
 			player->PlaySequence();
 			firstChange = false;
-			SaveSeqTest();
 		}
 	}
 	else
 	{
 		targetSong = (int)clientData;
+	}
+}
+
+void TW_CALL ChangeTheme(void *clientData)
+{
+	player->StopSequence();
+
+	jsonxx::Object theme = AliveAudio::m_Config.get<jsonxx::Array>("themes").get<jsonxx::Object>((int)clientData);
+	AliveAudio::LoadAllFromLvl(theme.get<jsonxx::String>("lvl", "null") + ".LVL", theme.get<jsonxx::String>("vab", "null"), theme.get<jsonxx::String>("seq", "null"));
+
+	TwRemoveAllVars(m_GUITones);
+	for (int e = 0; e < 128; e++)
+	{
+		for (int i = 0; i < AliveAudio::m_CurrentSoundbank->m_Programs[e]->m_Tones.size(); i++)
+		{
+			char labelTest[100];
+			sprintf(labelTest, "group='Program %i' label='%i - Min:%i Max:%i'", e, i, AliveAudio::m_CurrentSoundbank->m_Programs[e]->m_Tones[i]->Min, AliveAudio::m_CurrentSoundbank->m_Programs[e]->m_Tones[i]->Max);
+			TwAddButton(m_GUITones, nullptr, PlaySound, (void*)new int[2]{ e, i }, labelTest);
+		}
+	}
+
+	TwRemoveAllVars(m_GUISequences);
+	for (int i = 0; i < AliveAudio::m_LoadedSeqData.size(); i++)
+	{
+		char labelTest[100];
+		sprintf(labelTest, "group='Seq Files' label='Play Seq %i'", i);
+
+		TwAddButton(m_GUISequences, nullptr, PlaySong, (char*)i, labelTest);
 	}
 }
 
@@ -175,7 +145,7 @@ int AppAbeSound::Start()
 	TwDefine("SoundList size='205 600' ");
 	TwDefine("Voices size='305 600' ");
 
-	jsonxx::Array soundList = AliveAudio::m_MusicJson.get<jsonxx::Array>("sounds");
+	jsonxx::Array soundList = AliveAudio::m_Config.get<jsonxx::Array>("sounds");
 
 	for (int i = 0; i < soundList.size(); i++)
 	{
@@ -191,30 +161,30 @@ int AppAbeSound::Start()
 	TwAddVarRW(m_GUIInfo, "loop", TW_TYPE_BOOLCPP, &loopSong, "group='Settings' label='Loop'");
 	TwAddVarCB(m_GUIInfo, "voices", TW_TYPE_INT32, nullptr, GetVoiceCount, nullptr, "group='Info' label='Voices'");
 
-	jsonxx::Array themeList = AliveAudio::m_MusicJson.get<jsonxx::Array>("themes");
+	jsonxx::Array themeList = AliveAudio::m_Config.get<jsonxx::Array>("themes");
 
 	for (int i = 0; i < themeList.size(); i++)
 	{
 		char labelTest[100];
-		sprintf(labelTest, "group='Themes' label='Load Theme %s'", themeList.get<jsonxx::Object>(i).get<jsonxx::String>("vab", "null").c_str());
+		if (themeList.get<jsonxx::Object>(i).has<jsonxx::String>("name"))
+			sprintf(labelTest, "group='Themes' label='%s'", themeList.get<jsonxx::Object>(i).get<jsonxx::String>("name", "null").c_str());
+		else
+			sprintf(labelTest, "group='Themes' label='%s %s'", themeList.get<jsonxx::Object>(i).get<jsonxx::String>("lvl", "null").c_str(), themeList.get<jsonxx::Object>(i).get<jsonxx::String>("vab", "null").c_str());
 		TwAddButton(m_GUITheme, nullptr, ChangeTheme, (char*)i, labelTest);
-	}
-
-	for (int i = 0; i < 27; i++)
-	{
-		char labelTest[100];
-		sprintf(labelTest, "group='Seq Files' label='Play Seq %i'", i);
-
-		TwAddButton(m_GUISequences, nullptr, PlaySong, (char*)i, labelTest);
 	}
 
 	TwAddButton(m_GUIInfo, nullptr, StopMusic, nullptr, "group='Playback' label='Stop'");
 	TwAddButton(m_GUIInfo, nullptr, ResumeMusic, nullptr, "group='Playback' label='Resume'");
-
 	
 	renderShader = new mgShaderProgram();
-	renderShader->InitFromFile("data/basic.vsh", "data/basic.fsh");
+	renderShader->InitFromCharBuffer("#version 420\n layout(location=0) in vec4 Position;\nuniform mat4 Transform;\
+		uniform mat4 ProjectionView;void main() {gl_Position = ProjectionView * Transform * Position;}",
+		"#version 420\nuniform vec4 Color;void main(){gl_FragColor = Color;}");
+
 	basicRect = mgVertexData::CreateCircleFilled(5);
+
+	ChangeTheme((void*)8);
+	PlaySong((void*)23);
 
 	return true;
 }
@@ -246,10 +216,13 @@ int AppAbeSound::Update()
 	AliveAudio::voiceListMutex.lock();
 	for (auto v : AliveAudio::m_Voices)
 	{
-		/*char labelTest[100];
-		sprintf(labelTest, "group='Voices' label='Prog:%i Note%i NoteOffDelay:%f'", v->i_Program, v->i_Note, v->f_NoteOffDelay);
+		if (v->f_TrackDelay <= 0)
+		{
+			char labelTest[100];
+			sprintf(labelTest, "group='Voices' label='Prog:%i Note:%i'", v->i_Program, v->i_Note, v->f_NoteOffDelay);
 
-		TwAddButton(m_GUIVoiceList, nullptr, KillVoice, (void*)v, labelTest);*/
+			TwAddButton(m_GUIVoiceList, nullptr, KillVoice, (void*)v, labelTest);
+		}
 	}
 	AliveAudio::voiceListMutex.unlock();
 
@@ -265,33 +238,33 @@ int AppAbeSound::Draw()
 
 	renderShader->SetUniformMatrix4fv("ProjectionView", (float*)&projectionview);
 
-	/*AliveAudio::voiceListMutex.lock();
+	AliveAudio::voiceListMutex.lock();
 	for (auto v : AliveAudio::m_Voices)
 	{
-		if (v->m_TrackDelay > 0 && v->m_TrackDelay < 5000 * 32)
+		if (v->f_TrackDelay > 0 && v->f_TrackDelay < 5000 * 32)
 		{
 			vec2 blockPos = vec2();
 			vec4 color = vec4(1, 1, 1, 1);
 
-			blockPos.x += v->m_TrackDelay / 80;
-			blockPos.y += v->Note * 10;
+			blockPos.x += v->f_TrackDelay / 80;
+			blockPos.y += v->i_Note * 10;
 
-			mat4 world = glm::translate(vec3(16, 670, 0) + vec3(blockPos.x, blockPos.y, 0)) * glm::scale(vec3(8, 8, 0));
+			mat4 world = glm::translate(vec3(16, 570, 0) + vec3(blockPos.x, blockPos.y, 0)) * glm::scale(vec3(8, 8, 0));
 			renderShader->SetUniformMatrix4fv("Transform", (float*)&world);
 			renderShader->SetUniform4f("Color", color);
 			basicRect->Render(GL_TRIANGLE_STRIP);
 
-			if (v->m_NoteOffDelay > 0)
+			if (v->f_NoteOffDelay > 0)
 			{
 				color = vec4(1, 0, 0, 1);
-				world = glm::translate(vec3(16, 670, 0) + vec3(blockPos.x, blockPos.y, 0)) * glm::scale(vec3(4, 4, 2));
+				world = glm::translate(vec3(16, 570, 0) + vec3(blockPos.x + (v->f_NoteOffDelay / 80) - (v->f_TrackDelay / 80), blockPos.y, 0)) * glm::scale(vec3(4, 4, 2));
 				renderShader->SetUniformMatrix4fv("Transform", (float*)&world);
 				renderShader->SetUniform4f("Color", color);
 				basicRect->Render(GL_TRIANGLE_STRIP);
 			}
 		}
 	}
-	AliveAudio::voiceListMutex.unlock();*/
+	AliveAudio::voiceListMutex.unlock();
 
 	return mgApplication::Draw();
 }

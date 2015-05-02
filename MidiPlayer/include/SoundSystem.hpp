@@ -20,6 +20,8 @@
 #include "json\jsonxx.h"
 #include "FileManager.h"
 #include "oddlib\lvlarchive.hpp"
+#include "ADSR.h"
+//#include "reverb.h"
 
 void AliveInitAudio();
 void AliveAudioSDLCallback(void *udata, Uint8 *stream, int len);
@@ -60,7 +62,6 @@ class AliveAudioSample
 public:
 	Uint16 * m_SampleBuffer;
 	unsigned int i_SampleSize;
-	unsigned int i_SampleRate;
 
 	float GetSample(float sampleOffset);
 };
@@ -84,11 +85,11 @@ public:
 
 	float Pitch;
 
-	float AttackSpeed;
-	float ReleaseSpeed;
+	double AttackTime;
+	double ReleaseTime;
 	bool ReleaseExponential = false;
-	float DecaySpeed;
-	float SustainSpeed;
+	double DecayTime;
+	double SustainTime;
 
 	bool Loop = false;
 
@@ -115,43 +116,40 @@ public:
 	int		i_Program;
 	int		i_Note = 0;
 	bool	b_Dead = false;
-	float	f_SampleOffset = 0;
+	double	f_SampleOffset = 0;
 	bool	b_NoteOn = true;
-	float	f_Velocity = 1.0f;
-	float	f_Pitch = 0.0f;
+	double	f_Velocity = 1.0f;
+	double	f_Pitch = 0.0f;
 
 	int		i_TrackID = 0; // This is used to distinguish between sounds fx and music
-	float	f_TrackDelay = 0; // Used by the sequencer for perfect timing
+	double	f_TrackDelay = 0; // Used by the sequencer for perfect timing
 	bool	m_UsesNoteOffDelay = false;
-	float	f_NoteOffDelay = 0;
+	double	f_NoteOffDelay = 0;
 
 	// Active ADSR Levels
 
-	float ActiveAttackLevel = 0;
-	float ActiveReleaseLevel = 1;
-	float ActiveDecayLevel = 1;
-	float ActiveSustainLevel = 1;
+	double ActiveAttackLevel = 0;
+	double ActiveReleaseLevel = 1;
+	double ActiveDecayLevel = 1;
+	double ActiveSustainLevel = 1;
 
 	float GetSample()
 	{
 		if (b_Dead)	// Dont return anything if dead. This voice should now be removed.
 			return 0;
 
-		ActiveDecayLevel -= m_Tone->DecaySpeed;
+		// ActiveDecayLevel -= ((1.0 / AliveAudioSampleRate) / m_Tone->DecayTime);
+
 		if (ActiveDecayLevel < 0)
 			ActiveDecayLevel = 0;
 
 		if (!b_NoteOn)
 		{
-			// Todo. Do some math here to compensate for different device sample rates
-			//ActiveReleaseLevel = AliveAudioHelper::Lerp<float>(ActiveReleaseLevel, 0, m_Tone->ReleaseSpeed * ActiveReleaseLevel * 0.0003f); // <---
+			ActiveReleaseLevel -= ((1.0 / AliveAudioSampleRate) / m_Tone->ReleaseTime);
 
-			if (m_Tone->ReleaseExponential)
-				ActiveReleaseLevel -= (0.0002f * ActiveReleaseLevel) * m_Tone->ReleaseSpeed;
-			else
-				ActiveReleaseLevel -= (0.0002f * ActiveReleaseLevel) * 1;
+			ActiveReleaseLevel -= ((1.0 / AliveAudioSampleRate) / m_Tone->DecayTime); // Hacks?!?! --------------------
 
-			if (ActiveReleaseLevel <= 0.05f) // Release is done. So the voice is done.
+			if (ActiveReleaseLevel <= 0) // Release is done. So the voice is done.
 			{
 				b_Dead = true;
 				ActiveReleaseLevel = 0;
@@ -159,11 +157,7 @@ public:
 		}
 		else
 		{
-			/*ActiveSustainLevel -= m_Tone->SustainSpeed;
-			if (ActiveSustainLevel < 0)
-				ActiveSustainLevel = 0;*/
-
-			ActiveAttackLevel = AliveAudioHelper::Lerp<float>(ActiveAttackLevel, 1.0f, m_Tone->AttackSpeed); // TODO: Fix attack speed
+			ActiveAttackLevel += ((1.0 / AliveAudioSampleRate) / m_Tone->AttackTime);
 
 			if (ActiveAttackLevel > 1)
 				ActiveAttackLevel = 1;
@@ -179,9 +173,10 @@ public:
 				return 0; // Voice is dead now, so don't return anything.
 			}
 		}
-		float sampleRate = 0;
-		float sampleFrameRate = pow(1.059463f, i_Note - m_Tone->c_Center + m_Tone->Pitch + f_Pitch) * (44100.0f / AliveAudioSampleRate);
+
+		double sampleFrameRate = pow(1.059463, i_Note - m_Tone->c_Center + m_Tone->Pitch + f_Pitch) * (44100.0 / AliveAudioSampleRate);
 		f_SampleOffset += (sampleFrameRate);
+
 		return m_Tone->m_Sample->GetSample(f_SampleOffset) * ActiveAttackLevel * ActiveDecayLevel * ((b_NoteOn) ? ActiveSustainLevel : ActiveReleaseLevel) * f_Velocity;
 	}
 };
@@ -210,7 +205,7 @@ public:
 
 	static void PlayOneShot(std::string soundID)
 	{
-		jsonxx::Array soundList = AliveAudio::m_MusicJson.get<jsonxx::Array>("sounds");
+		jsonxx::Array soundList = AliveAudio::m_Config.get<jsonxx::Array>("sounds");
 
 		for (int i = 0; i < soundList.size(); i++)
 		{
@@ -424,5 +419,5 @@ public:
 	static bool voiceListLocked;
 	static long long currentSampleIndex;
 
-	static jsonxx::Object m_MusicJson;
+	static jsonxx::Object m_Config;
 };

@@ -73,6 +73,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="src\ADSR.cpp" />
     <ClCompile Include="src\AppAbeSound.cpp" />
     <ClCompile Include="src\Application.cpp" />
     <ClCompile Include="src\FileManager.cpp" />
@@ -90,12 +91,14 @@
     <ClCompile Include="thirdparty\loadgen\gl_core_4_4.c" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="include\ADSR.h" />
     <ClInclude Include="include\AppAbeSound.h" />
     <ClInclude Include="include\Application.h" />
     <ClInclude Include="include\FileManager.h" />
     <ClInclude Include="include\json\jsonxx.h" />
     <ClInclude Include="include\oddlib\lvlarchive.hpp" />
     <ClInclude Include="include\PreciseTimer.h" />
+    <ClInclude Include="include\reverb.h" />
     <ClInclude Include="include\SequencePlayer.h" />
     <ClInclude Include="include\ShaderProgram.h" />
     <ClInclude Include="include\SoundSystem.hpp" />

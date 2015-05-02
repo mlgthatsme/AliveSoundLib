@@ -37,49 +37,31 @@ void Vab::ReadVb( std::istream& aStream )
 {
 
     //    aStream.setByteOrder( QDataStream::LittleEndian );
+	aStream.seekg(0, aStream.end);
+	int streamSize = aStream.tellg();
+	aStream.seekg(0, aStream.beg);
+    
+	if (streamSize > 5120) // No exoddus vb is greater than 5kb
+	{
+		for (_Uint32t i = 0; i < iHeader->iNumVags; ++i)
+		{
+			AoVag* vag = new AoVag();
+			aStream.read((char*)&vag->iSize, sizeof(vag->iSize));
+			aStream.read((char*)&vag->iSampleRate, sizeof(vag->iSampleRate));
+			vag->iSampleData.resize(vag->iSize);
+			aStream.read((char*)vag->iSampleData.data(), vag->iSize);
 
-    /*
-    for ( quint32 i=0; i<iHeader->iNumVags; ++i )
-    {
-        AoVag* vag = new AoVag();
-        aStream >> vag->iSize;
-        aStream >> vag->iSampleRate;
-        for ( quint32 k=0; k<vag->iSize; ++k )
-        {
-            quint8 byte = 0;
-            aStream >> byte;
-            vag->iSampleData.append( byte );
-        }
-        iAoVags.push_back( vag );
-    }
-
-    qDebug("Eof = %d", aStream.atEnd() );
-
-    for ( quint32 i=0; i<iAoVags.size(); ++i )
-    {
-        quint32 rate = iAoVags[i]->iSampleRate;
-        QByteArray data = iAoVags[i]->iSampleData;
-
-        WaveFile file;
-
-        // Sometimes rate is negative, no idea why!
-        qint32 signedRate = static_cast< qint32 > ( rate );
-        quint32 positiveRate = abs( signedRate );
-
-        file.SetSampleData( data, positiveRate );
-
-        QString fileName = "test_sound_" + QString::number( i ) + ".wav";
-        file.Save( fileName );
-    }
-    */
-
-
-    for ( unsigned int i=0; i<iHeader->iNumVags; i++ )
-    {
-        AEVh* vh = new AEVh( aStream );
-        iOffs.push_back( vh );
-    }
-
+			iAoVags.push_back(vag);
+		}
+	}
+	else
+	{
+		for (unsigned int i = 0; i < iHeader->iNumVags; i++)
+		{
+			AEVh* vh = new AEVh(aStream);
+			iOffs.push_back(vh);
+		}
+	}
 }
 
 

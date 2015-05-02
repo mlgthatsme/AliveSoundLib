@@ -13,7 +13,7 @@
 
 std::vector<unsigned char> AliveAudio::m_SoundsDat;
 AliveAudioSoundbank * AliveAudio::m_CurrentSoundbank = nullptr;
-jsonxx::Object AliveAudio::m_MusicJson;
+jsonxx::Object AliveAudio::m_Config;
 
 std::vector<AliveAudioVoice *> AliveAudio::m_Voices;
 std::mutex AliveAudio::voiceListMutex;
@@ -29,6 +29,15 @@ float AliveAudioSample::GetSample(float sampleOffset)
 
 	int roundedOffset = (int)floor(sampleOffset);
 	return AliveAudioHelper::SampleSint16ToFloat(AliveAudioHelper::Lerp<Sint16>(m_SampleBuffer[roundedOffset], m_SampleBuffer[roundedOffset + 1], sampleOffset - roundedOffset));
+}
+
+void LoadJsonConfig(std::string filePath)
+{
+	std::string jsonData = mgFileManager::ReadFileToString(filePath.c_str());
+	jsonxx::Object obj;
+	obj.parse(jsonData);
+
+	AliveAudio::m_Config.import(obj);
 }
 
 void AliveInitAudio()
@@ -51,11 +60,9 @@ void AliveInitAudio()
 		exit(-1);
 	}
 
-	std::string musicJson = mgFileManager::ReadFileToString("data/json/music.json");
-	jsonxx::Object obj;
-	obj.parse(musicJson);
-	AliveAudio::m_MusicJson = obj;
-	
+	LoadJsonConfig("data/themes.json");
+	LoadJsonConfig("data/sfx_list.json");
+
 	std::ifstream soundDatFile;
 	soundDatFile.open("sounds.dat", std::ios::binary);
 	if (!soundDatFile.is_open())
@@ -146,8 +153,8 @@ void AliveRenderAudio(float * AudioStream, int StreamLength)
 			float leftSample = s * leftPan;
 			float rightSample = s * rightPan;
 
-			SDL_MixAudioFormat((Uint8 *)(AudioStream + i), (const Uint8*)&leftSample, AUDIO_F32, sizeof(float), 20); // Left Channel
-			SDL_MixAudioFormat((Uint8 *)(AudioStream + i + 1), (const Uint8*)&rightSample, AUDIO_F32, sizeof(float), 20); // Right Channel
+			SDL_MixAudioFormat((Uint8 *)(AudioStream + i), (const Uint8*)&leftSample, AUDIO_F32, sizeof(float), 37); // Left Channel
+			SDL_MixAudioFormat((Uint8 *)(AudioStream + i + 1), (const Uint8*)&rightSample, AUDIO_F32, sizeof(float), 37); // Right Channel
 		}
 
 		AliveAudio::currentSampleIndex++;
@@ -158,18 +165,25 @@ void AliveRenderAudio(float * AudioStream, int StreamLength)
 	CleanVoices();
 }
 
+typedef struct _StereoSample
+{
+	float L;
+	float R;
+} StereoSample;
+
 void AliveAudioSDLCallback(void *udata, Uint8 *stream, int len)
 {
 	memset(stream, 0, len);
 	AliveRenderAudio((float *)stream, len / sizeof(float));
 }
 
-#define BINARY_GETMASK(index, size) (((1 << size) - 1) << index)
-#define BINARY_READFROM(data, index, size) ((data & BINARY_GETMASK(index, size)) >> index)
-#define BINARY_WRITETO(data, index, size, value) (data = (data & (~BINARY_GETMASK(index, size))) | (value << index))
-
 AliveAudioSoundbank::~AliveAudioSoundbank()
 {
+	for(auto sample : m_Samples)
+	{
+		delete sample;
+	}
+
 	for (auto program : m_Programs)
 	{
 		for (auto tone : program->m_Tones)
@@ -247,12 +261,29 @@ AliveAudioSoundbank::AliveAudioSoundbank(std::string lvlPath, std::string vabID)
 
 void AliveAudioSoundbank::InitFromVab(Vab& mVab)
 {
-	for (auto offset : mVab.iOffs)
+	for (int i = 0; i < mVab.iOffs.size();i++)
 	{
 		AliveAudioSample * sample = new  AliveAudioSample();
-		sample->i_SampleSize = offset->iLengthOrDuration / sizeof(Uint16);
-		sample->m_SampleBuffer = (Uint16*)(AliveAudio::m_SoundsDat.data() + offset->iFileOffset);
-		sample->i_SampleRate = offset->iUnusedByEngine;
+		sample->i_SampleSize = mVab.iOffs[i]->iLengthOrDuration / sizeof(Uint16);
+		if (mVab.iAoVags.size() > 0)
+		{
+			sample->m_SampleBuffer = new Uint16[mVab.iAoVags[i]->iSize / sizeof(Uint16)];
+			std::copy(mVab.iAoVags[i]->iSampleData.data(), mVab.iAoVags[i]->iSampleData.data() + mVab.iAoVags[i]->iSampleData.size(), sample->m_SampleBuffer);
+		}
+		else
+			sample->m_SampleBuffer = (Uint16*)(AliveAudio::m_SoundsDat.data() + mVab.iOffs[i]->iFileOffset);
+
+		m_Samples.push_back(sample);
+	}
+
+	for (int i = 0; i < mVab.iAoVags.size(); i++)
+	{
+		AliveAudioSample * sample = new  AliveAudioSample();
+		sample->i_SampleSize = mVab.iAoVags[i]->iSize / sizeof(Uint16);
+
+		sample->m_SampleBuffer = (Uint16*)new char[mVab.iAoVags[i]->iSize];
+		//std::copy(mVab.iAoVags[i]->iSampleData.begin(), mVab.iAoVags[i]->iSampleData.end(), sample->m_SampleBuffer);
+		memcpy(sample->m_SampleBuffer, mVab.iAoVags[i]->iSampleData.data(), mVab.iAoVags[i]->iSize);
 		m_Samples.push_back(sample);
 	}
 
@@ -263,7 +294,11 @@ void AliveAudioSoundbank::InitFromVab(Vab& mVab)
 		{
 			AliveAudioTone * tone = new AliveAudioTone();
 
-			//printf("Program:%i\tTone: %i\tReserved:%i\n",i, t, mVab.iProgs[i]->iTones[t]->);
+			if (mVab.iProgs[i]->iTones[t]->iVag == 0) // Some Tones have vag 0? Essentially null?
+			{
+				delete tone;
+				continue;
+			}
 
 			tone->f_Volume = mVab.iProgs[i]->iTones[t]->iVol / 127.0f;
 			tone->c_Center = mVab.iProgs[i]->iTones[t]->iCenter;
@@ -278,31 +313,20 @@ void AliveAudioSoundbank::InitFromVab(Vab& mVab)
 			unsigned short ADSR1 = mVab.iProgs[i]->iTones[t]->iAdsr1;
 			unsigned short ADSR2 = mVab.iProgs[i]->iTones[t]->iAdsr2;
 
+			REAL_ADSR realADSR = {};
+			PSXConvADSR(&realADSR, ADSR1, ADSR2, false);
 
-			unsigned short attackRate = BINARY_READFROM(ADSR1, 1, 7);
-			unsigned short sustainRate = ((ADSR2 & 0x2000) >> 13);
-			/*printf("Attack Rate Expon: %i\n", (ADSR1 & 0x8000) >> 15);
-			printf("Attack Rate: %i\n", attackRate);
-			printf("Decay Rate: %i\n", 15 - ((ADSR1 & 0xF0) >> 4));
-			printf("Sustain Level: %i\n", (ADSR1 & 0x0F));
+			tone->AttackTime = realADSR.attack_time;
+			tone->DecayTime = realADSR.decay_time;
+			tone->ReleaseTime = realADSR.release_time;
+			tone->SustainTime = realADSR.sustain_time;
 
-			printf("Sustain Rate Expon: %i\n", (ADSR2 & 0x8000) >> 15);
-			printf("Sustain Rate Sign: %i\n", (ADSR2 & 0x4000) >> 14);
-			printf("Sustain Rate: %i\n", sustainRate);
-
-			printf("Release Rate: %i\n", 31 - (ADSR2 & 0x001F));
-			printf("Release Rate Expon: %i\n", (ADSR2 & 0x20) >> 5);*/
-
-			tone->AttackSpeed = attackRate / 127.0f;
-			tone->DecaySpeed = (15 - ((ADSR1 & 0xF0) >> 4)) / 15.0f;
-			tone->SustainSpeed = sustainRate / 127.0f;
-			tone->ReleaseSpeed = (31 - (ADSR2 & 0x001F)) / 31.0f;
-			tone->ReleaseExponential = ((ADSR2 & 0x20) >> 5);
-
-			if ((i == 14 && t == 11) || (i == 27 && t == 0)) // Do loop hacks here
-			{
+			if (realADSR.attack_time > 1) // This works until the loop database is added.
 				tone->Loop = true;
-			}
+
+			/*if (i == 27 || i == 81)
+				tone->Loop = true;*/
+			
 		}
 
 		m_Programs.push_back(program);
