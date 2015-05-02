@@ -42,8 +42,8 @@ void AliveInitAudio()
 		exit(-1);
 	}
 
-	LoadJsonConfig("data/themes.json");
-	LoadJsonConfig("data/sfx_list.json");
+	LoadJsonConfig("config/themes.json");
+	LoadJsonConfig("config/sfx_list.json");
 
 	std::ifstream soundDatFile;
 	soundDatFile.open("sounds.dat", std::ios::binary);
